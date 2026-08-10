@@ -58,21 +58,23 @@ function parseSchedule(html) {
     if (!dateMatch) continue;
     const timeMatch = dateText.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
 
-    // Cell 1: opponent — look for vs or @ then extract team name after any images
+    // Cell 1: opponent — detect home (vs) or away (@) then extract team name
     const oppRaw = cells[1];
-    const haMatch = oppRaw.match(/\b(vs|@)\b/i);
-    if (!haMatch) continue;
+    const oppNoImg = oppRaw.replace(/<img[^>]*\/?>/gi, '');
+    const oppText = stripTags(oppNoImg).trim();
 
-    // Remove img tags, then strip remaining tags to get team name
-    const oppNoImg = oppRaw.replace(/<img[^>]*>/gi, '');
-    // Get text after "vs" or "@"
-    const oppText = stripTags(oppNoImg);
+    // Check for vs (home) or @ (away) — avoid \b before @ since it's not a word char
+    const isHome = /\bvs\b/i.test(oppText);
+    const isAway = oppText.includes('@');
+    if (!isHome && !isAway) continue;
+
     const oppNameMatch = oppText.match(/(?:vs|@)\s*(.+)/i);
     if (!oppNameMatch) continue;
     let opponent = oppNameMatch[1].trim()
       .replace(/\*/g, '')
       .replace(/Preview.*$/i, '')
       .replace(/Watch.*$/i, '')
+      .replace(/Official.*$/i, '')
       .trim();
     if (!opponent || opponent.length < 2) continue;
 
@@ -87,7 +89,7 @@ function parseSchedule(html) {
     games.push({
       date: `${months[parseInt(m)]} ${parseInt(d)}`,
       time: timeMatch ? timeMatch[1].toUpperCase().replace(/\s+/,'') : 'TBD',
-      homeAway: haMatch[1].toLowerCase() === 'vs' ? 'HOME' : 'AWAY',
+      homeAway: isHome ? 'HOME' : 'AWAY',
       opponent,
       result: resultMatch ? { outcome: resultMatch[1].toUpperCase(), score: resultMatch[2] } : null,
       isRegion,
