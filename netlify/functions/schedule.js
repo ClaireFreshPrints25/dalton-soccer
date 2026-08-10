@@ -28,29 +28,67 @@ function fetchUrl(url) {
   });
 }
 
+function stripTags(str) {
+  return str.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getCells(row) {
+  const cells = [];
+  const cellPattern = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+  let m;
+  while ((m = cellPattern.exec(row)) !== null) {
+    cells.push(m[1]);
+  }
+  return cells;
+}
+
 function parseSchedule(html) {
   const games = [];
+  const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowMatch;
+
   while ((rowMatch = rowPattern.exec(html)) !== null) {
-    const row = rowMatch[1];
-    const dateMatch = row.match(/(\d{1,2}\/\d{1,2})/);
+    const cells = getCells(rowMatch[1]);
+    if (cells.length < 2) continue;
+
+    // Cell 0: date + time  e.g. "2/9 5:30pm"
+    const dateText = stripTags(cells[0]);
+    const dateMatch = dateText.match(/(\d{1,2})\/(\d{1,2})/);
     if (!dateMatch) continue;
-    const timeMatch = row.match(/(\d{1,2}:\d{2}(?:am|pm))/i);
-    const haMatch = row.match(/\b(vs|@)\b/i);
+    const timeMatch = dateText.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
+
+    // Cell 1: opponent — look for vs or @ then extract team name after any images
+    const oppRaw = cells[1];
+    const haMatch = oppRaw.match(/\b(vs|@)\b/i);
     if (!haMatch) continue;
-    const oppMatch = row.match(/(?:vs|@)[^<]*(?:<[^>]+>)*([A-Z][^<\n]{2,40}?)(?:<\/a>|\*)/i)
-      || row.match(/(?:vs|@)\s*(?:<[^>]+>\s*)*([A-Z][A-Za-z\s]+?)(?:\s*<|\s*\*|\s*\[)/);
-    if (!oppMatch) continue;
-    const resultMatch = row.match(/\b([WLT])\s+(\d{1,2}-\d{1,2})\b/i);
-    const isRegion = row.includes('\\*') || /region/i.test(row);
-    const [, m, d] = dateMatch[0].match(/(\d+)\/(\d+)/);
-    const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    // Remove img tags, then strip remaining tags to get team name
+    const oppNoImg = oppRaw.replace(/<img[^>]*>/gi, '');
+    // Get text after "vs" or "@"
+    const oppText = stripTags(oppNoImg);
+    const oppNameMatch = oppText.match(/(?:vs|@)\s*(.+)/i);
+    if (!oppNameMatch) continue;
+    let opponent = oppNameMatch[1].trim()
+      .replace(/\*/g, '')
+      .replace(/Preview.*$/i, '')
+      .replace(/Watch.*$/i, '')
+      .trim();
+    if (!opponent || opponent.length < 2) continue;
+
+    // Check for region game marker
+    const isRegion = oppRaw.includes('*') || /\*/.test(cells[1]);
+
+    // Cell 2 or further: result
+    const resultText = cells.length > 2 ? stripTags(cells[cells.length - 1]) : '';
+    const resultMatch = resultText.match(/\b([WLT])\s+(\d{1,2}-\d{1,2})\b/i);
+
+    const [, m, d] = dateMatch;
     games.push({
       date: `${months[parseInt(m)]} ${parseInt(d)}`,
-      time: timeMatch ? timeMatch[1].toUpperCase().replace('AM',' AM').replace('PM',' PM') : 'TBD',
-      homeAway: haMatch[1].toUpperCase() === 'VS' ? 'HOME' : 'AWAY',
-      opponent: oppMatch[1].trim().replace(/\s+/g,' '),
+      time: timeMatch ? timeMatch[1].toUpperCase().replace(/\s+/,'') : 'TBD',
+      homeAway: haMatch[1].toLowerCase() === 'vs' ? 'HOME' : 'AWAY',
+      opponent,
       result: resultMatch ? { outcome: resultMatch[1].toUpperCase(), score: resultMatch[2] } : null,
       isRegion,
     });
@@ -63,16 +101,11 @@ function parseRoster(html) {
   const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowMatch;
   while ((rowMatch = rowPattern.exec(html)) !== null) {
-    const row = rowMatch[1];
-    const numMatch = row.match(/<td[^>]*>\s*(\d{1,2})\s*<\/td>/);
+    const cells = getCells(rowMatch[1]).map(stripTags);
+    const numMatch = cells[0] && cells[0].match(/^\d{1,2}$/);
     if (!numMatch) continue;
-    const nameMatch = row.match(/\/athlete\/[\s\S]*?>([^<]{3,40})<\/a>/i)
-      || row.match(/<td[^>]*>\s*<a[^>]*>([A-Z][^<]{2,40})<\/a>/);
-    if (!nameMatch) continue;
-    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m =>
-      m[1].replace(/<[^>]+>/g,'').trim()
-    );
-    players.push({ number: numMatch[1], name: nameMatch[1].trim(), position: cells[2] || '', grade: cells[3] || '' });
+    if (!cells[1] || cells[1].length < 3) continue;
+    players.push({ number: cells[0], name: cells[1], position: cells[2] || '', grade: cells[3] || '' });
   }
   return players;
 }
@@ -82,10 +115,7 @@ function parseStaff(html) {
   const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowMatch;
   while ((rowMatch = rowPattern.exec(html)) !== null) {
-    const row = rowMatch[1];
-    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m =>
-      m[1].replace(/<[^>]+>/g,'').trim()
-    );
+    const cells = getCells(rowMatch[1]).map(stripTags);
     if (cells.length >= 2 && cells[0].length > 2 && /coach/i.test(cells[1])) {
       staff.push({ name: cells[0], role: cells[1] });
     }
@@ -96,20 +126,16 @@ function parseStaff(html) {
 
 function parseNews(html) {
   const articles = [];
-  // Match news article links with title and date
   const pattern = /•([\w]+ \d+, \d{4})\s*\n+\[([^\]]+)\]\((https:\/\/www\.maxpreps\.com\/news\/[^)]+)\)/g;
   let m;
   while ((m = pattern.exec(html)) !== null) {
     const date  = m[1].trim();
     const title = m[2].replace(/\s{2,}/g,' ').trim();
     const url   = m[3];
-    // Skip duplicates and previews if we already have 3 recaps
     const isRecap   = /recap/i.test(title);
     const isPreview = /preview/i.test(title);
     const tag = isRecap ? '⚽ Game Recap' : isPreview ? '👀 Preview' : '📣 News';
-    if (!articles.find(a => a.url === url)) {
-      articles.push({ date, title, url, tag });
-    }
+    if (!articles.find(a => a.url === url)) articles.push({ date, title, url, tag });
     if (articles.length >= 3) break;
   }
   return articles;
