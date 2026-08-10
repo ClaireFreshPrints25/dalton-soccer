@@ -1,10 +1,11 @@
 const https = require('https');
 
 const URLS = {
-  schedule: 'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/schedule/',
-  roster:   'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/roster/',
-  staff:    'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/staff/',
-  news:     'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/media/news/',
+  schedule:   'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/schedule/',
+  roster:     'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/roster/',
+  'jv-roster':'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/jv/spring/roster/',
+  staff:      'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/staff/',
+  news:       'https://www.maxpreps.com/ga/dalton/dalton-catamounts/soccer/girls/spring/media/news/',
 };
 
 function fetchUrl(url) {
@@ -148,7 +149,7 @@ exports.handler = async (event) => {
   try {
     const html = await fetchUrl(URLS[type] || URLS.schedule);
     let data;
-    if      (type === 'roster') data = parseRoster(html);
+    if      (type === 'roster' || type === 'jv-roster') data = parseRoster(html);
     else if (type === 'staff')  data = parseStaff(html);
     else if (type === 'news')   data = parseNews(html);
     else                        data = parseSchedule(html);
